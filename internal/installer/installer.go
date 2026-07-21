@@ -27,6 +27,9 @@ type Update struct {
 	Explain []string
 	Status  StepStatus
 	Err     error
+	// Output is the captured stdout+stderr of the failed command, so the
+	// TUI can show a short excerpt inline instead of only pointing at the log file.
+	Output []byte
 }
 
 // Run executes every step in order, skipping ones already marked complete
@@ -58,7 +61,7 @@ func Run(steps []Step, st *state.State, mgr *system.Manager, logger *log.Logger)
 			state.LogStep(logger, step.ID, step.Title, out, err)
 
 			if err != nil {
-				ch <- Update{StepID: step.ID, Title: step.Title, Explain: step.Explain, Status: StatusFailed, Err: err}
+				ch <- Update{StepID: step.ID, Title: step.Title, Explain: step.Explain, Status: StatusFailed, Err: err, Output: out}
 				st.InProgress = false
 				_ = st.Save()
 				return
