@@ -76,6 +76,7 @@ type Model struct {
 	installOutput []byte
 	logger        *log.Logger
 	logCloser     func() error
+	cancelConfirm bool // true right after a first Ctrl+C, waiting for a second to actually confirm
 
 	quitting bool
 }
@@ -145,16 +146,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// cancelRunningCmd asks the currently in-flight installer command to stop
+func cancelRunningCmd(mgr *system.Manager) tea.Cmd {
+	return func() tea.Msg {
+		system.CancelRunning()
+		if mgr != nil {
+			mgr.CleanupStaleLock(system.DefaultRunner)
+		}
+		return nil
+	}
+}
+
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.screen == scrInstall {
-		// Only allow a clean interrupt while installing; don't let stray keys interfere with the running step.
 		if msg.String() == "ctrl+c" {
+			if !m.cancelConfirm {
+				m.cancelConfirm = true
+				return m, nil
+			}
 			m.quitting = true
 			if m.logCloser != nil {
 				_ = m.logCloser()
 			}
-			return m, tea.Quit
+			// Terminate whatever install command is currently running
+			return m, tea.Sequence(cancelRunningCmd(m.mgr), tea.Quit)
 		}
+		m.cancelConfirm = false
 		return m, nil
 	}
 
