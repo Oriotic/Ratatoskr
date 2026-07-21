@@ -7,6 +7,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -62,7 +64,40 @@ Usage:
   ratatoskr help      Show this help`)
 }
 
+// ensureSudo makes sure we have a live sudo credential 
+func ensureSudo() {
+	if os.Geteuid() == 0 {
+		return // already root; sudo isn't part of the picture
+	}
+	if _, err := exec.LookPath("sudo"); err != nil {
+		fmt.Fprintln(os.Stderr, "ratatoskr: this needs sudo, but it isn't installed/available")
+		os.Exit(1)
+	}
+
+	fmt.Println(acc.Render("Ratatoskr") + dim.Render(" needs administrator access to install packages."))
+	fmt.Println()
+
+	cmd := exec.Command("sudo", "-v")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "\nratatoskr: couldn't get sudo access, stopping.")
+		os.Exit(1)
+	}
+	fmt.Println()
+
+	// Keep the credential alive for the rest of the run.
+	go func() {
+		for {
+			time.Sleep(4 * time.Minute)
+			_ = exec.Command("sudo", "-n", "-v").Run()
+		}
+	}()
+}
+
 func runSetup() {
+	ensureSudo()
 	m, err := tui.New()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ratatoskr: failed to start:", err)
@@ -150,6 +185,8 @@ func runRepair() {
 		return
 	}
 
+	ensureSudo() // only ask once we know there's actually something to install
+
 	logger, closer, err := state.NewLogger()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ratatoskr: could not open log:", err)
@@ -160,8 +197,6 @@ func runRepair() {
 	var steps []installer.Step
 	for _, r := range failing {
 		steps = append(steps, r.Step)
-		// Force re-run even if a stale state file thinks it's done; the
-		// live Check() already told us it isn't.
 		delete(st.CompletedSteps, r.Step.ID)
 	}
 
