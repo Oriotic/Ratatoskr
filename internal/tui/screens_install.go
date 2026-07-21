@@ -32,6 +32,7 @@ func (m *Model) handleStepUpdate(msg stepUpdateMsg) (tea.Model, tea.Cmd) {
 	}
 	if u.Status == installer.StatusFailed {
 		m.installErr = u.Err
+		m.installOutput = u.Output
 		m.screen = scrDone
 		if m.logCloser != nil {
 			_ = m.logCloser()
@@ -86,6 +87,13 @@ func (m *Model) viewDone() string {
 	if m.installErr != nil {
 		b.WriteString(badStyle.Render("Setup stopped early") + "\n\n")
 		b.WriteString(textStyle.Render(fmt.Sprintf("%s failed: %v", m.currentTitle, m.installErr)) + "\n\n")
+		if lines := lastLines(m.installOutput, 3); len(lines) > 0 {
+			b.WriteString(dimStyle.Render("Last output:") + "\n")
+			for _, l := range lines {
+				b.WriteString("  " + dimStyle.Render(l) + "\n")
+			}
+			b.WriteString("\n")
+		}
 		b.WriteString(dimStyle.Render("Full output is in " + logPathHint() + "\n"))
 		b.WriteString(dimStyle.Render("Fix the issue and re-run Ratatoskr — completed steps will be skipped.") + "\n")
 		b.WriteString("\n" + helpStyle.Render("Enter: exit"))
@@ -121,4 +129,19 @@ func (m *Model) viewDone() string {
 
 func logPathHint() string {
 	return "~/.local/state/ratatoskr/ratatoskr.log"
+}
+
+func lastLines(output []byte, n int) []string {
+	raw := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var lines []string
+	for _, l := range raw {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
 }
