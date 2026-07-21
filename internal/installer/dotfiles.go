@@ -25,6 +25,18 @@ func DotfilesMarkerExists() bool {
 	return err == nil
 }
 
+// DotfilesMarkerMatches reports whether the last-applied dotfiles marker
+// was written for this exact repo URL. If the user changes their dotfiles
+// URL between runs, this returns false so the step re-runs and links from
+// the new repo instead of silently trusting a marker left by the old one.
+func DotfilesMarkerMatches(url string) bool {
+	b, err := os.ReadFile(dotfilesMarkerPath())
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(b)) == strings.TrimSpace(url)
+}
+
 // knownDotfileNames are the config files/dirs Ratatoskr will link from a
 // dotfiles repo into $HOME if present, rather than blindly copying
 // everything (which would also copy the repo's README, LICENSE, etc).
