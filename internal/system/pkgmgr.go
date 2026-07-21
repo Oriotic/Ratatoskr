@@ -1,9 +1,14 @@
 package system
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
 )
 
 // PkgSet maps a distro Family to the package name(s)
@@ -25,11 +30,76 @@ func NewManager(d Distro) *Manager {
 // while still streaming nothing to the terminal (the TUI owns the screen).
 type Runner func(name string, args ...string) ([]byte, error)
 
-// DefaultRunner shells out for real.
+// runningMu guards runningPID: the process-group ID of whatever command
+// DefaultRunner currently has in flight (0 = nothing running). Ratatoskr
+// only ever runs one installer step at a time, so a single slot is enough.
+var (
+	runningMu  sync.Mutex
+	runningPID int
+)
+
 func DefaultRunner(name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
-	return cmd.CombinedOutput()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	if err := cmd.Start(); err != nil {
+		return buf.Bytes(), err
+	}
+
+	runningMu.Lock()
+	runningPID = cmd.Process.Pid
+	runningMu.Unlock()
+
+	err := cmd.Wait()
+
+	runningMu.Lock()
+	runningPID = 0
+	runningMu.Unlock()
+
+	return buf.Bytes(), err
+}
+
+var (
+	geteuid    = os.Geteuid
+	runKillCmd = func(args ...string) error { return exec.Command(args[0], args[1:]...).Run() }
+)
+
+
+func sendGroupSignal(pid int, sig syscall.Signal, sigName string) {
+	if geteuid() == 0 {
+		_ = syscall.Kill(-pid, sig)
+		return
+	}
+	_ = runKillCmd("sudo", "-n", "kill", "-"+sigName, "-"+strconv.Itoa(pid))
+}
+
+// CancelRunning terminates whatever command DefaultRunner currently has in flight
+func CancelRunning() {
+	runningMu.Lock()
+	pid := runningPID
+	runningMu.Unlock()
+	if pid == 0 {
+		return
+	}
+
+	sendGroupSignal(pid, syscall.SIGTERM, "TERM")
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		runningMu.Lock()
+		stillRunning := runningPID == pid
+		runningMu.Unlock()
+		if !stillRunning {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	sendGroupSignal(pid, syscall.SIGKILL, "KILL")
 }
 
 // Update refreshes package indexes.
@@ -105,4 +175,50 @@ func containsInstalledOk(status string) bool {
 // Pkgs resolves a PkgSet to the concrete package list for this manager's family.
 func (m *Manager) Pkgs(set PkgSet) []string {
 	return set[m.Family]
+}
+
+func (m *Manager) lockPaths() []string {
+	switch m.Name {
+	case "apt":
+		return []string{"/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock", "/var/cache/apt/archives/lock"}
+	case "dnf":
+		return []string{"/var/cache/dnf/metadata_lock.pid"}
+	case "pacman":
+		return []string{"/var/lib/pacman/db.lck"}
+	case "zypper":
+		return []string{"/var/run/zypp.pid"}
+	}
+	return nil
+}
+
+// processNames are the process name(s) that indicate this package manager
+// is still active somewhere on the system
+func (m *Manager) processNames() []string {
+	switch m.Name {
+	case "apt":
+		return []string{"apt-get", "apt", "dpkg", "unattended-upgr"}
+	case "dnf":
+		return []string{"dnf", "dnf5", "rpm"}
+	case "pacman":
+		return []string{"pacman"}
+	case "zypper":
+		return []string{"zypper"}
+	}
+	return nil
+}
+
+// CleanupStaleLock removes this package manager's lock file(s)
+func (m *Manager) CleanupStaleLock(run Runner) {
+	names := m.processNames()
+	if len(names) == 0 {
+		return
+	}
+	for _, n := range names {
+		if _, err := run("pgrep", "-x", n); err == nil {
+			return // something by that name is still alive; leave the lock alone
+		}
+	}
+	for _, p := range m.lockPaths() {
+		_, _ = run("sudo", "rm", "-f", p)
+	}
 }
