@@ -14,10 +14,10 @@ import (
 // a command is running).
 type Step struct {
 	ID      string
-	Title   string 
+	Title   string
 	Explain []string
-	Check func(run system.Runner) bool
-	Run func(run system.Runner) ([]byte, error)
+	Check   func(run system.Runner) bool
+	Run     func(run system.Runner) ([]byte, error)
 	// SkipInDoctor marks steps that don't represent a meaningful health
 	// state (e.g. "refresh package indexes" always looks "unhealthy"
 	// because it's designed to always re-run) so `doctor`/`repair` don't
@@ -122,7 +122,7 @@ func BuildSteps(sel state.Selection, mgr *system.Manager) []Step {
 			ID:      "dotfiles",
 			Title:   "Copying dotfiles from " + sel.DotfilesURL,
 			Explain: []string{"Cloning your dotfiles repo.", "Backing up any existing files it would overwrite.", "Linking the rest into place."},
-			Check:   func(run system.Runner) bool { return DotfilesMarkerExists() },
+			Check:   func(run system.Runner) bool { return DotfilesMarkerMatches(sel.DotfilesURL) },
 			Run:     func(run system.Runner) ([]byte, error) { return ApplyDotfiles(sel.DotfilesURL) },
 		})
 	}
