@@ -66,7 +66,12 @@ func (m *Model) viewInstall() string {
 		}
 	}
 
-	b.WriteString("\n" + helpStyle.Render("Ctrl+C: cancel (progress is saved and resumable)"))
+	if m.cancelConfirm {
+		b.WriteString("\n" + badStyle.Render("Cancel the install? Progress so far is saved.") + "\n")
+		b.WriteString(helpStyle.Render("Ctrl+C again: confirm cancel   Any other key: keep going"))
+	} else {
+		b.WriteString("\n" + helpStyle.Render("Ctrl+C: cancel (progress is saved and resumable)"))
+	}
 	return boxStyle.Render(b.String())
 }
 
