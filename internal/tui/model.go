@@ -66,15 +66,16 @@ type Model struct {
 	dotfilesInput string
 
 	// Install screen
-	steps        []installer.Step
-	stepStatus   map[string]installer.StepStatus
-	stepOrder    []string
-	currentTitle string
-	currentLines []string
-	progressCh   <-chan installer.Update
-	installErr   error
-	logger       *log.Logger
-	logCloser    func() error
+	steps         []installer.Step
+	stepStatus    map[string]installer.StepStatus
+	stepOrder     []string
+	currentTitle  string
+	currentLines  []string
+	progressCh    <-chan installer.Update
+	installErr    error
+	installOutput []byte
+	logger        *log.Logger
+	logCloser     func() error
 
 	quitting bool
 }
